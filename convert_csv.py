@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import openpyxl
+from datetime import datetime, date
 
 st.set_page_config(page_title="Excel → CSV", page_icon="📊", layout="centered")
 
@@ -10,17 +11,23 @@ st.markdown("Carga un archivo Excel y descárgalo como CSV separado por coma, **
 
 # --- Funciones de utilidad ---
 
+def celda_a_str(valor):
+    """Convierte el valor de una celda a string, forzando fechas a dd-mm-yyyy."""
+    if valor is None:
+        return ""
+    # datetime debe ir antes que date porque datetime es subclase de date
+    if isinstance(valor, datetime):
+        return valor.strftime("%d-%m-%Y")
+    if isinstance(valor, date):
+        return valor.strftime("%d-%m-%Y")
+    return str(valor)
+
+
 def leer_hoja_sin_conversion(ws):
     """Lee una hoja de openpyxl celda a celda y devuelve lista de listas con valores como texto."""
     filas = []
     for fila in ws.iter_rows(values_only=True):
-        fila_str = []
-        for celda in fila:
-            if celda is None:
-                fila_str.append("")
-            else:
-                fila_str.append(str(celda))
-        filas.append(fila_str)
+        filas.append([celda_a_str(celda) for celda in fila])
     return filas
 
 

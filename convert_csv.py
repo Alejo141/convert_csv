@@ -1,0 +1,83 @@
+import streamlit as st
+import pandas as pd
+import io
+import openpyxl
+
+st.set_page_config(page_title="Excel → CSV", page_icon="📊", layout="centered")
+
+st.title("📊 Conversor Excel → CSV")
+st.markdown("Carga un archivo Excel y descárgalo como CSV separado por coma, **sin modificar el formato de los datos**.")
+
+# --- Funciones de utilidad ---
+
+def leer_hoja_sin_conversion(ws):
+    """Lee una hoja de openpyxl celda a celda y devuelve lista de listas con valores como texto."""
+    filas = []
+    for fila in ws.iter_rows(values_only=True):
+        fila_str = []
+        for celda in fila:
+            if celda is None:
+                fila_str.append("")
+            else:
+                fila_str.append(str(celda))
+        filas.append(fila_str)
+    return filas
+
+
+def filas_a_csv_bytes(filas):
+    """Convierte lista de listas a bytes CSV."""
+    output = io.StringIO()
+    for fila in filas:
+        # Escapar celdas que contengan coma, comilla o salto de línea
+        celdas_escapadas = []
+        for celda in fila:
+            if ',' in celda or '"' in celda or '\n' in celda:
+                celda = '"' + celda.replace('"', '""') + '"'
+            celdas_escapadas.append(celda)
+        output.write(",".join(celdas_escapadas) + "\n")
+    return output.getvalue().encode("utf-8-sig")  # BOM para compatibilidad con Excel en Windows
+
+
+# --- UI ---
+
+archivo = st.file_uploader("Selecciona un archivo Excel", type=["xlsx", "xls", "xlsm"])
+
+if archivo:
+    try:
+        wb = openpyxl.load_workbook(archivo, data_only=True)
+        hojas = wb.sheetnames
+
+        hoja_sel = st.selectbox("Selecciona la hoja a convertir:", hojas)
+
+        ws = wb[hoja_sel]
+
+        # Vista previa (primeras 10 filas)
+        filas = leer_hoja_sin_conversion(ws)
+        n_filas = len(filas)
+        n_cols = max((len(f) for f in filas), default=0)
+
+        st.markdown(f"**Hoja:** `{hoja_sel}` · {n_filas} filas × {n_cols} columnas")
+
+        if filas:
+            preview_df = pd.DataFrame(filas[1:11], columns=filas[0] if filas else [])
+            st.markdown("**Vista previa (primeras 10 filas):**")
+            st.dataframe(preview_df, use_container_width=True)
+
+        # Generar CSV
+        csv_bytes = filas_a_csv_bytes(filas)
+        nombre_csv = archivo.name.rsplit(".", 1)[0] + f"_{hoja_sel}.csv"
+
+        st.download_button(
+            label="⬇️ Descargar CSV",
+            data=csv_bytes,
+            file_name=nombre_csv,
+            mime="text/csv",
+        )
+
+        st.success(f"Archivo listo: **{nombre_csv}** ({len(csv_bytes):,} bytes)")
+
+    except Exception as e:
+        st.error(f"Error al procesar el archivo: {e}")
+
+st.markdown("---")
+st.caption("Los datos se preservan exactamente como están en Excel: fechas, números, textos y celdas vacías no son transformados.")

@@ -4,6 +4,7 @@ import io
 import openpyxl
 from datetime import datetime, date
 from decimal import Decimal
+import re
 
 st.set_page_config(page_title="Excel → CSV", page_icon="📊", layout="centered")
 
@@ -12,48 +13,76 @@ st.markdown("Carga un archivo Excel y descárgalo como CSV separado por coma, **
 
 # --- Funciones de utilidad ---
 
-def numero_a_str(valor):
+def contar_decimales_formato(fmt):
     """
-    Convierte un número float a string preservando decimales reales.
-    - Enteros representados como float (5.0) → '5'
-    - Con decimales (3.14) → '3.14'
-    - Sin notación científica (1e-5 → '0.00001')
+    Extrae cuántos decimales indica el número_format de Excel.
+    Ej: '0.00' → 2, '#,##0.000' → 3, '0' → 0, 'General' → None
+    """
+    if not fmt or fmt.strip().upper() in ("GENERAL", "@", ""):
+        return None
+
+    # Ignorar secciones de formato negativo/cero/texto (separadas por ;)
+    seccion = fmt.split(";")[0]
+
+    # Quitar secciones de color/condición como [Red], [$€-...]
+    seccion = re.sub(r'\[.*?\]', '', seccion)
+
+    # Buscar la parte decimal: dígitos después del punto en el patrón numérico
+    match = re.search(r'\.([0#?]+)', seccion)
+    if match:
+        return len(match.group(1))
+    return 0
+
+
+def numero_a_str(valor, fmt):
+    """
+    Convierte un número a string respetando el formato visual de Excel.
+    - Si el formato indica N decimales → aplica exactamente N decimales.
+    - Si el formato es General o no reconocido → usa la representación natural.
     """
     try:
-        d = Decimal(str(valor)).normalize()
-        _, _, exp = d.as_tuple()
-        if exp >= 0:
-            return str(int(valor))
-        return format(d, 'f')
+        decimales = contar_decimales_formato(fmt)
+
+        if decimales is None:
+            # Formato General: representación natural sin ceros innecesarios
+            d = Decimal(str(valor)).normalize()
+            _, _, exp = d.as_tuple()
+            if exp >= 0:
+                return str(int(valor))
+            return format(d, 'f')
+
+        # Formato explícito: respetar cantidad de decimales
+        return f"{valor:.{decimales}f}"
+
     except Exception:
         return str(valor)
 
 
-def celda_a_str(valor):
-    """Convierte el valor de una celda a string, forzando fechas a dd-mm-yyyy y preservando decimales."""
+def celda_a_str(celda):
+    """Convierte una celda openpyxl a string respetando fechas y formato numérico."""
+    valor = celda.value
+    fmt = celda.number_format if celda.number_format else "General"
+
     if valor is None:
         return ""
     if isinstance(valor, datetime):
         return valor.strftime("%d-%m-%Y")
     if isinstance(valor, date):
         return valor.strftime("%d-%m-%Y")
-    if isinstance(valor, float):
-        return numero_a_str(valor)
-    if isinstance(valor, int):
-        return str(valor)
+    if isinstance(valor, (int, float)):
+        return numero_a_str(valor, fmt)
     return str(valor)
 
 
-def leer_hoja_sin_conversion(ws):
-    """Lee una hoja de openpyxl celda a celda y devuelve lista de listas con valores como texto."""
+def leer_hoja(ws):
+    """Lee la hoja celda a celda accediendo al objeto celda completo (no values_only)."""
     filas = []
-    for fila in ws.iter_rows(values_only=True):
+    for fila in ws.iter_rows():
         filas.append([celda_a_str(celda) for celda in fila])
     return filas
 
 
 def filas_a_csv_bytes(filas):
-    """Convierte lista de listas a bytes CSV."""
     output = io.StringIO()
     for fila in filas:
         celdas_escapadas = []
@@ -75,10 +104,9 @@ if archivo:
         hojas = wb.sheetnames
 
         hoja_sel = st.selectbox("Selecciona la hoja a convertir:", hojas)
-
         ws = wb[hoja_sel]
 
-        filas = leer_hoja_sin_conversion(ws)
+        filas = leer_hoja(ws)
         n_filas = len(filas)
         n_cols = max((len(f) for f in filas), default=0)
 
@@ -105,4 +133,4 @@ if archivo:
         st.error(f"Error al procesar el archivo: {e}")
 
 st.markdown("---")
-st.caption("Fechas en dd-mm-yyyy · Decimales preservados · Enteros sin punto · Textos y vacíos sin transformación.")
+st.caption("Fechas en dd-mm-yyyy · Decimales según formato visual de Excel · Textos y vacíos sin transformación.")
